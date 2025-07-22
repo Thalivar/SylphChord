@@ -28,12 +28,12 @@ with mpHands.Hands(max_num_hands=2, min_detection_confidence=0.7) as hands:
                 indexTip = hand_landmarks.landmark[mpHands.HandLandmark.INDEX_FINGER_TIP]
                 h, w, i = frame.shape
                 cx, cy = int(indexTip.x * w), int(indexTip.y * h) # <- Gets the coordinates of the index finger tip
-                cv2.circle(frame, (cx, cy), 10, (20,255, 0), -1)
+                cv2.circle(frame, (cx, cy), 10, (0, 0, 255), -1)
 
         cv2.imshow("SylphChord", frame) # <- Shows the frame
 
         if cv2.waitKey(1) & 0xFF == 27: # <- Breaks the loop incase ESC is pressed
             break
 
-cap.release() # <- Releases the webcam
+wCam.release() # <- Releases the webcam
 cv2.destroyAllWindows() # <- Closes the window
