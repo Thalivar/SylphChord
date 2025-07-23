@@ -21,18 +21,20 @@ def setVolume(percent):
     subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"])
 
 def isOpenGrab(landmarks, h):
-    grabScore = 0
+    grabFingers = []
     finger = [
         mpHands.HandLandmark.INDEX_FINGER_TIP,
         mpHands.HandLandmark.MIDDLE_FINGER_TIP,
         mpHands.HandLandmark.RING_FINGER_TIP,
-        mpHands.HandLandmark.PINKY_TIP
+        mpHands.HandLandmark.PINKY_TIP,
+        mpHands.HandLandmark.THUMB_TIP
         ]
     bases = [
         mpHands.HandLandmark.INDEX_FINGER_MCP,
         mpHands.HandLandmark.MIDDLE_FINGER_MCP,
         mpHands.HandLandmark.RING_FINGER_MCP,
-        mpHands.HandLandmark.PINKY_MCP
+        mpHands.HandLandmark.PINKY_MCP,
+        mpHands.HandLandmark.THUMB_MCP
     ]
 
     for tip, base in zip(finger, bases):
@@ -41,9 +43,9 @@ def isOpenGrab(landmarks, h):
         verticalGap = abs(yTip - yBase)
 
         if 30 < verticalGap < 120:
-            grabScore += 1
+            grabFingers.append(tip)
     
-    return grabScore >= 3 # <- Only considers it a grab if more than 3 fingers are curved
+    return grabFingers
 
 while wCam.isOpened(): # <- Loops while the webcam is open
     # Reads the webcame frame
@@ -67,8 +69,16 @@ while wCam.isOpened(): # <- Loops while the webcam is open
             x2, y2 = int(fingerList[mpHands.HandLandmark.THUMB_TIP].x * w), int(fingerList[mpHands.HandLandmark.THUMB_TIP].y * h)
 
             angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
-            distance = math.hypot(x2 - x1, y2 - y1) # <- Calculates the distance between the thumb and index finger tips
-            isGrabbing = isOpenGrab(fingerList, h)
+            distance = math.hypot(x2 - x1, y2 - y1)
+
+            grabbingFingers = isOpenGrab(fingerList, h)
+            isGrabbing = len(grabbingFingers) >= 3
+            
+            mpDrawing.draw_landmarks(frame, hand_landmarks, mpHands.HAND_CONNECTIONS)
+            for tip_idx in grabbingFingers:
+                cx = int(fingerList[tip_idx].x * w)
+                cy = int(fingerList[tip_idx].y * h)
+                cv2.circle(frame, (cx, cy), 12, (230, 130, 255), -1)
 
             if isGrabbing:
                 if not adjusting:
@@ -82,18 +92,17 @@ while wCam.isOpened(): # <- Loops while the webcam is open
                     currentVolume = newVolume
                     setVolume(currentVolume)
 
-                    cv2.rectangle(frame, (50, 100), (85, 400), (0, 0, 0), 2) # <- Outline for the volume bar
-                    volBarHeight = int((100 - currentVolume) * 3)
-                    cv2.rectangle(frame, (51, 100 + volBarHeight), (84, 400), (0, 255, 0), -1)
-                    cv2.putText(frame, f"Volume: {currentVolume}%", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             else:
                 adjusting = False
 
-            frameCount += 1
-            if frameCount % 10 == 0: # <- Updates the volume every 10 frames, It's to throttle the amixer command
-                setVolume(currentVolume)
-            
-            setVolume(currentVolume)
+    frameCount += 1
+    if frameCount % 30 == 0: # <- Updates the volume every x frames. Puruly here to have better feedback with my old camera
+        setVolume(currentVolume)
+
+    cv2.rectangle(frame, (50, 100), (85, 400), (0, 0, 0), 2) # <- Outline for the volume bar
+    volBarHeight = int((100 - currentVolume) * 3)
+    cv2.rectangle(frame, (51, 100 + volBarHeight), (84, 400), (0, 255, 0), -1) # <- The volume bar
+    cv2.putText(frame, f"Volume: {currentVolume}%", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
     cv2.imshow("SylphChord", frame) # <- Shows the frame
 
