@@ -13,12 +13,52 @@ startAngle = 0
 startVolume = 0
 currentVolume = 50
 sensitivity = 1.0
+prevDelta = 0.0
+smootherAlpha = 0.3
+playPauseTriggered = False
+playPauseCooldown = 0
 
 # === Initializes the camera/webcam ===
 wCam = cv2.VideoCapture(0)
 
 def setVolume(percent):
     subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"])
+
+def playPause():
+    subprocess.run(["playerctl", "-p", "ncspot", "play-pause"])
+
+def nextSong():
+    subprocess.run(["playerctl", "-p", "ncspot", "next"])
+
+def prevSong():
+    subprocess.run(["playerctl", "-p", "ncspot", "previous"])
+
+def isTwoFingersUp(landmarks, h, w):
+    count = []
+    tips = [
+        mpHands.HandLandmark.INDEX_FINGER_TIP,
+        mpHands.HandLandmark.MIDDLE_FINGER_TIP
+    ]
+    pips = [
+        mpHands.HandLandmark.INDEX_FINGER_PIP,
+        mpHands.HandLandmark.MIDDLE_FINGER_PIP
+    ]
+
+    for tip, pip in zip(tips, pips):
+        if landmarks[tip].y * h < landmarks[pip].y * h:
+            count.append(tip)
+
+    if len(count) != 2:
+        return []
+    
+    x1, y1 = int(landmarks[tips[0]].x * w), int(landmarks[tips[0]].y * h)
+    x2, y2 = int(landmarks[tips[1]].x * w), int(landmarks[tips[1]].y * h)
+    distance = math.hypot(x2 - x1, y2 - y1)
+
+    if distance < 40:
+        return [mpHands.HandLandmark.INDEX_FINGER_TIP, mpHands.HandLandmark.MIDDLE_FINGER_TIP]
+    
+    return []
 
 def isOpenGrab(landmarks, h):
     grabFingers = []
@@ -73,12 +113,31 @@ while wCam.isOpened(): # <- Loops while the webcam is open
 
             grabbingFingers = isOpenGrab(fingerList, h)
             isGrabbing = len(grabbingFingers) >= 3
+
+            fingersUp = isTwoFingersUp(fingerList, h, w)
+            twoFingersUp = len(fingersUp) == 2
             
             mpDrawing.draw_landmarks(frame, hand_landmarks, mpHands.HAND_CONNECTIONS)
             for tip_idx in grabbingFingers:
                 cx = int(fingerList[tip_idx].x * w)
                 cy = int(fingerList[tip_idx].y * h)
                 cv2.circle(frame, (cx, cy), 12, (230, 130, 255), -1)
+
+            for tip_idx in fingersUp:
+                cx = int(fingerList[tip_idx].x * w)
+                cy = int(fingerList[tip_idx].y * h)
+                cv2.circle(frame, (cx, cy), 12, (200, 150, 200), -1)
+            
+            if twoFingersUp:
+                if not playPauseTriggered:
+                    playPause()
+                    playPauseTriggered = True
+                    playPauseCooldown = 60
+                else:
+                    playPauseTriggered = False
+            
+            if playPauseCooldown > 0:
+                playPauseCooldown -= 1
 
             if isGrabbing:
                 if not adjusting:
@@ -87,7 +146,10 @@ while wCam.isOpened(): # <- Loops while the webcam is open
                     startVolume = currentVolume
                 else:
                     delta = angle - startAngle
-                    newVolume = int(startVolume + delta * sensitivity)
+                    smootherDelta = smootherAlpha * delta + (1 - smootherAlpha) * prevDelta
+                    prevDelta = smootherDelta
+
+                    newVolume = int(startVolume + smootherDelta * sensitivity)
                     newVolume = max(0, min(100, newVolume))
                     currentVolume = newVolume
                     setVolume(currentVolume)
@@ -107,6 +169,7 @@ while wCam.isOpened(): # <- Loops while the webcam is open
     cv2.imshow("SylphChord", frame) # <- Shows the frame
 
     if cv2.waitKey(1) & 0xFF == 27: # <- Breaks the loop incase ESC is pressed
+        setVolume(50) # Resets the volume
         break
 
 wCam.release()
