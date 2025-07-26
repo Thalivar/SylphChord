@@ -1,0 +1,15 @@
+{
+    "play": {
+        "topLeft": [100, 100],
+        "bottomRight": [200, 200]
+    },
+    "next": {
+        "topLeft": [250, 100],
+        "bottomRight": [350, 200]
+    },
+    "prev": {
+        "topLeft": [400, 100],
+        "bottomRight": [500, 200]
+    },
+    "_comment": "Only using topLeft and bottomRight for now as the zones will be in place. Add more corners incase it has to track more things"
+}

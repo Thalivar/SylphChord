@@ -2,8 +2,9 @@ import math
 import mediapipe as mp
 import cv2
 import subprocess
+import json
+import os
 
-# === Initialize MediaPipe hands and akso the drawing utilities ===
 mpHands = mp.solutions.hands
 mpDrawing = mp.solutions.drawing_utils
 hands = mpHands.Hands(min_detection_confidence = 0.7)
@@ -16,10 +17,24 @@ sensitivity = 1.0
 prevDelta = 0.0
 smootherAlpha = 0.3
 playPauseTriggered = False
+nextTriggered = False
+prevTriggered = False
 playPauseCooldown = 0
-
-# === Initializes the camera/webcam ===
+nextCooldown = 0
+prevCooldown = 0
 wCam = cv2.VideoCapture(0)
+
+def loadZones():
+    basePath = os.path.dirname(os.path.abspath(__file__))
+    zonesPath = os.path.join(basePath, "zones.json")
+    with open(zonesPath, "r") as f:
+        return json.load(f)
+zones = loadZones()
+
+def isInZone(x, y, zones):
+    x1, y1 = zones("topLeft")
+    x2, y2 = zones("bottomRight")
+    return x1 <= x <= x2 and y1 <= y <= y2
 
 def setVolume(percent):
     subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"])
@@ -95,8 +110,12 @@ while wCam.isOpened(): # <- Loops while the webcam is open
         break
 
     frame = cv2.flip(frame, 1) # <- Flips the frame
+    frame = cv2.resize(frame, (960, 700))
     rgbFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) # <- Converts the frame to RGB
     result = hands.process(rgbFrame) # <- Processes the frame
+    playZone = zones["play"]
+    nextZone = zones["next"]
+    prevZone = zones["prev"]
 
     if result.multi_hand_landmarks:
         for hand_landmarks in result.multi_hand_landmarks:
@@ -129,12 +148,21 @@ while wCam.isOpened(): # <- Loops while the webcam is open
                 cv2.circle(frame, (cx, cy), 12, (200, 150, 200), -1)
             
             if twoFingersUp:
-                if not playPauseTriggered:
+                x, y = int(fingerList[mpHands.HandLandmark.INDEX_FINGER_TIP].x * w), int(fingerList[mpHands.HandLandmark.INDEX_FINGER_TIP].y * h)
+                
+                if isInZone(x, y, playZone) and not playPauseTriggered:
                     playPause()
                     playPauseTriggered = True
-                    playPauseCooldown = 60
-                else:
-                    playPauseTriggered = False
+                    playPauseCooldown = 120
+                elif isInZone(x, y, nextZone) and not nextTriggered:
+                    nextSong()
+                    nextTriggered = True
+                    nextCooldown = 120
+                elif isInZone(x, y, prevZone) and not prevTriggered:
+                    prevSong()
+                    prevTriggered = True
+                    prevCooldown = 120
+                
             
             if playPauseCooldown > 0:
                 playPauseCooldown -= 1
@@ -166,10 +194,19 @@ while wCam.isOpened(): # <- Loops while the webcam is open
     cv2.rectangle(frame, (51, 100 + volBarHeight), (84, 400), (0, 255, 0), -1) # <- The volume bar
     cv2.putText(frame, f"Volume: {currentVolume}%", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
+    for name, zone in zones.items():
+        if not isinstance(zone, dict):
+            continue # Skips the temporary comment i left in the json file remove this once its gone
+
+        x1, y1 = zone["topLeft"]
+        x2, y2 = zone["bottomRight"]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 0), 2)
+        cv2.putText(frame, name.capitalize(), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
     cv2.imshow("SylphChord", frame) # <- Shows the frame
 
     if cv2.waitKey(1) & 0xFF == 27: # <- Breaks the loop incase ESC is pressed
-        setVolume(50) # Resets the volume
+        setVolume(45) # Resets the volume
         break
 
 wCam.release()
