@@ -32,21 +32,25 @@ def loadZones():
 zones = loadZones()
 
 def isInZone(x, y, zones):
-    x1, y1 = zones("topLeft")
-    x2, y2 = zones("bottomRight")
+    x1, y1 = zones["topLeft"]
+    x2, y2 = zones["bottomRight"]
     return x1 <= x <= x2 and y1 <= y <= y2
 
 def setVolume(percent):
     subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"])
+    print(f"[VOLUME] Volume has been set to : {percent}%")
 
 def playPause():
     subprocess.run(["playerctl", "-p", "ncspot", "play-pause"])
+    print("[MEDIA] Play/Pause has been triggered")
 
 def nextSong():
     subprocess.run(["playerctl", "-p", "ncspot", "next"])
+    print("[MEDIA] Next song has been triggered")
 
 def prevSong():
     subprocess.run(["playerctl", "-p", "ncspot", "previous"])
+    print("[MEDIA] Prev song has been triggered")
 
 def isTwoFingersUp(landmarks, h, w):
     count = []
@@ -166,6 +170,16 @@ while wCam.isOpened(): # <- Loops while the webcam is open
             
             if playPauseCooldown > 0:
                 playPauseCooldown -= 1
+            elif playPauseTriggered:
+                playPauseTriggered = False
+            if nextCooldown > 0:
+                nextCooldown -= 1
+            elif nextTriggered:
+                nextTriggered = False
+            if prevCooldown > 0:
+                prevCooldown -= 1
+            elif prevTriggered:
+                prevTriggered = False
 
             if isGrabbing:
                 if not adjusting:
