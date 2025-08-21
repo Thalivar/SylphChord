@@ -1,5 +1,6 @@
 import subprocess
 import math
+import time
 import mediapipe as mp
 from config.settings import Config
 
@@ -11,8 +12,12 @@ class VolumeController:
         self.startVolume = 0
         self.prevDelta = 0.0
         self.mpHands = mp.solutions.hands
+        self.lastVolumeSet = 0
 
     def setVolume(self, percent):
+        if time.time() - self.lastVolumeSet < 0.1:
+            return
+        
         try:
             subprocess.run([
                 "pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"
@@ -36,7 +41,10 @@ class VolumeController:
 
         newVolume = int(self.startVolume + smootherDelta * Config.volumeSensitivity)
         self.currentVolume = max(0, min(100, newVolume))
-        self.setVolume(self.currentVolume)
+
+        if abs(newVolume - self.currentVolume) > 2:
+            self.currentVolume = newVolume
+            self.setVolume(self.currentVolume)
     
     def stopAdjusting(self):
         self.adjusting = False

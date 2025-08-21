@@ -7,55 +7,54 @@ class GestureProcessor:
     def __init__(self):
         self.mpHands = mp.solutions.hands
 
-    def isTwoFingersUp(self, landmarks, h, w):
-        tips = [
-            self.mpHands.HandLandmark.INDEX_FINGER_TIP,
-            self.mpHands.HandLandmark.MIDDLE_FINGER_TIP
-        ]
-        pips = [
-            self.mpHands.HandLandmark.INDEX_FINGER_PIP,
-            self.mpHands.HandLandmark.MIDDLE_FINGER_PIP
-        ]
+    def isOneFingerUp(self, landmarks, h, w):
+        indexTip = self.mpHands.HandLandmark.INDEX_FINGER_TIP
+        indexPip = self.mpHands.HandLandmark.INDEX_FINGER_PIP
+        indexPIP = self.mpHands.HandLandmark.INDEX_FINGER_PIP
+        middleTip = self.mpHands.HandLandmark.MIDDLE_FINGER_TIP
+        middlePip = self.mpHands.HandLandmark.MIDDLE_FINGER_PIP
+        ringTip = self.mpHands.HandLandmark.RING_FINGER_TIP
+        ringPip = self.mpHands.HandLandmark.RING_FINGER_PIP
+        pinkyTip = self.mpHands.HandLandmark.PINKY_TIP
+        pinkyPip = self.mpHands.HandLandmark.PINKY_PIP
+        indexExtended = landmarks[indexTip].y * h < landmarks[indexPip].y * h
+        indexExtension = abs(landmarks[indexTip].y - landmarks[indexPIP].y) * h
+        middleFolded = landmarks[middleTip].y * h > landmarks[middlePip].y * h
+        ringFolded = landmarks[ringTip].y * h > landmarks[ringPip].y * h
+        pinkyFolded = landmarks[pinkyTip].y * h > landmarks[pinkyPip].y * h
 
-        extendedFingers = []
-        for tip, pip in zip(tips, pips):
-            if landmarks[tip].y * h < landmarks[pip].y * h:
-                extendedFingers.append(tip)
-        
-        if len(extendedFingers) != 2:
-            return []
-        
-        x1 = int(landmarks[tips[0]].x * w)
-        y1 = int(landmarks[tips[0]].y * h)
-        x2 = int(landmarks[tips[1]].x * w)
-        y2 = int(landmarks[tips[1]].y * h)
+        if (indexExtended and middleFolded and ringFolded and pinkyFolded and indexExtension > Config.fingerExtensionThreshold):
+            x = int(landmarks[indexTip].x * w)
+            y = int(landmarks[indexTip].y * h)
+            return (x, y)
 
-        distance = math.hypot(x2 - x1, y2 - y1)
-        return extendedFingers if distance < Config.fingerDistanceThreshold else []
-    
+        return None
+
     def isGrabbing(self, landmarks, h):
         fingerTips = [
             self.mpHands.HandLandmark.INDEX_FINGER_TIP,
             self.mpHands.HandLandmark.MIDDLE_FINGER_TIP,
             self.mpHands.HandLandmark.RING_FINGER_TIP,
-            self.mpHands.HandLandmark.PINKY_TIP,
-            self.mpHands.HandLandmark.THUMB_TIP
+            self.mpHands.HandLandmark.PINKY_TIP
         ]
-        fingerBases = [
-            self.mpHands.HandLandmark.INDEX_FINGER_MCP,
-            self.mpHands.HandLandmark.MIDDLE_FINGER_MCP,
-            self.mpHands.HandLandmark.RING_FINGER_MCP,
-            self.mpHands.HandLandmark.PINKY_MCP,
-            self.mpHands.HandLandmark.THUMB_MCP
+        fingerPips = [
+            self.mpHands.HandLandmark.INDEX_FINGER_PIP,
+            self.mpHands.HandLandmark.MIDDLE_FINGER_PIP,
+            self.mpHands.HandLandmark.RING_FINGER_PIP,
+            self.mpHands.HandLandmark.PINKY_PIP
         ]
 
-        extendedFingers = []
-        for tip, base in zip(fingerTips, fingerBases):
-            yTip = landmarks[tip].y * h
-            yBase = landmarks[base].y * h
-            verticalGap = abs(yTip - yBase)
+        thumbTip = self.mpHands.HandLandmark.THUMB_TIP
+        thumbIp = self.mpHands.HandLandmark.THUMB_IP
 
-            if Config.grabMinGap < verticalGap < Config.grabMaxGap:
-                extendedFingers.append(tip)
-            
-        return extendedFingers, len(extendedFingers) >= Config.grabMinFingers
+        foldedFingers = 0
+        for tip, pip in zip(fingerTips, fingerPips):
+            if landmarks[tip].y > landmarks[pip].y:
+                foldedFingers += 1
+
+        if landmarks[thumbTip].y > landmarks[thumbIp].x:
+            foldedFingers += 1
+
+        isGrabbing = foldedFingers >= 4
+
+        return [], isGrabbing

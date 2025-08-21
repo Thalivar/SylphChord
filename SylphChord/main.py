@@ -1,4 +1,5 @@
 import cv2
+import time
 from core.camera import CameraManager
 from core.handDetector import HandDetector
 from core.gestureProcessor import GestureProcessor
@@ -6,6 +7,8 @@ from controllers.volumeController import VolumeController
 from controllers.mediaController import MediaController
 from utils.zoneManager import ZoneManager
 from config.settings import Config
+from core.gestureStateManager import GestureStateManager, GestureMode
+from utils.uiManager import UIManager
 
 class SylphChord:
     def __init__(self):
@@ -15,77 +18,132 @@ class SylphChord:
         self.volumeController = VolumeController()
         self.mediaController = MediaController()
         self.zoneManager = ZoneManager()
+        self.gestureStateManager = GestureStateManager()
+        self.uiManager = UIManager()
+        self.fpsHistory = []
+        self.lastTime = time.time()
+        self.pendingNotification = None
     
-    def drawUI(self, frame):
-        cv2.rectangle(frame, (50, 100), (85, 400), (0, 0, 0), 2)
-        volumeBarHeight = int((100 - self.volumeController.currentVolume) * 3)
-        cv2.rectangle(frame, (51, 100 + volumeBarHeight), (84, 400), (0, 255, 0), -1)
-        cv2.putText(frame, f"Volume: {self.volumeController.currentVolume}%",
-                    (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
+    def drawUI(self, frame, fps = 0):
+        self.uiManager.drawVolumeBar(frame, self.volumeController.currentVolume)
         self.zoneManager.drawZones(frame)
-    
-    def processGestures(self, handLandmarks, frame):
-        h, w, _ = frame.shape
-        landmarks = handLandmarks.landmark
+        self.uiManager.drawGestureModeIndicator(frame, self.gestureStateManager.currentMode)
+        self.uiManager.drawFPSCounter(frame, fps)
 
-        grabbingFingers, isGrabbing = self.gestureProcessor.isGrabbing(landmarks, h)
-        fingersUp = self.gestureProcessor.isTwoFingersUp(landmarks, h, w)
-        twoFingersUp = len(fingersUp) == 2
-
-        for tipIDX in grabbingFingers:
-            cx = int(landmarks[tipIDX].x * w)
-            cy = int(landmarks[tipIDX].y * h)
-            cv2.circle(frame, (cx, cy), 12, (230, 130, 255), -1)
-        
-        for tipIDX in fingersUp:
-            cx = int(landmarks[tipIDX].x * w)
-            cy = int(landmarks[tipIDX].y * h)
-            cv2.circle(frame, (cx, cy), 12, (200, 150, 200), -1)
-        
-        if twoFingersUp:
-            indexTip = self.gestureProcessor.mpHands.HandLandmark.INDEX_FINGER_TIP
-            x = int(landmarks[indexTip].x * w)
-            y = int(landmarks[indexTip].y * h)
-
-            if self.zoneManager.isInZone(x, y, "play"):
-                self.mediaController.playPause()
-            elif self.zoneManager.isInZone(x, y, "next"):
-                self.mediaController.nextSong()
-            elif self.zoneManager.isInZone(x, y, "prev"):
-                self.mediaController.prevSong()
-        
-        if isGrabbing:
-            angle = self.volumeController.getAngleBetweenFingers(landmarks, w, h)
-            if not self.volumeController.adjusting:
-                self.volumeController.startAdjusting(angle)
-            else:
-                self.volumeController.updateVolume(angle)
+        if hasattr(self, "pendingNotification") and self.pendingNotification:
+            self.uiManager.showNotification(frame, self.pendingNotification)
+            self.pendingNotification = None
         else:
-            self.volumeController.stopAdjusting
+            self.uiManager.showNotification(frame, "", 0)
+        
+        if getattr(self.uiManager, "showControlsHelp", False):
+            self.uiManager.drawControlsHelp(frame)
+
+    def calculateFPS(self):
+        currentTime = time.time()
+        if hasattr(self, "lastTime"):
+            fps = 1.0 / (currentTime - self.lastTime)
+            self.fpsHistory.append(fps)
+            
+            if len(self.fpsHistory) > 30:
+                self.fpsHistory.pop(0)
+        
+        self.lastTime = currentTime
+        return sum(self.fpsHistory) / len(self.fpsHistory) if self.fpsHistory else 0
+    
+    def handleKeyboardInput(self):
+        key = cv2.waitKey(1) & 0xFF
+
+        if key == ord("l") or key == ord("L"):
+            showLandmarks = self.uiManager.toggleLandmarks()
+            self.pendingNotification = f"Landmarks {'ON' if showLandmarks else 'OFF'}"
+        elif key == ord("r") or key == ord("R"):
+            self.gestureStateManager.setMode(GestureMode.idle)
+            self.pendingNotification = "Gesture State Reset"
+        elif key == ord("m") or key == ord("M"):
+            modeInfo = self.gestureStateManager.getModeInfo()
+            self.pendingNotification = f"Mode: {modeInfo['mode'].value.capitalize()}"
+        elif key == ord("h") or key == ord("H"):
+            self.uiManager.showControlsHelp = not getattr(self.uiManager, "showControlsHelp", False)
+        elif key == 27:
+            return True
+
+        return False
+
+    def handleVolumeControl(self, landmarks, w, h):
+        angle = self.volumeController.getAngleBetweenFingers(landmarks, w, h)
+        if not self.volumeController.adjusting:
+            self.volumeController.startAdjusting(angle)
+        else:
+            self.volumeController.updateVolume(angle)
+    
+    def handleMediaControl(self, landmarks, w, h):
+        indexTip = landmarks[8]
+        x, y = int(indexTip.x * w), int(indexTip.y * h)
+
+        if self.zoneManager.isInZone(x, y, "play"):
+            self.mediaController.playPause()
+            self.pendingNotification = "Play/Pause has been triggered"
+        elif self.zoneManager.isInZone(x, y, "next"):
+            self.mediaController.nextSong()
+            self.pendingNotification = "Next song has been triggered"
+        elif self.zoneManager.isInZone(x, y, "prev"):
+            self.mediaController.prevSong()
+            self.pendingNotification = "Previous song has been triggered"
+
+    def processGestures(self, handLandmarks, frame):
+        h, w, c = frame.shape
+        fingerTip = self.gestureProcessor.isOneFingerUp(handLandmarks.landmark, h, w)
+        extendedFingers, isGrabbing = self.gestureProcessor.isGrabbing(handLandmarks.landmark, h)
+
+        inMediaZone = False
+        if fingerTip:
+            x, y = fingerTip
+            inMediaZone = (self.zoneManager.isInZone(x, y, "play") or
+                           self.zoneManager.isInZone(x, y, "next") or
+                           self.zoneManager.isInZone(x, y, "prev"))
+        
+        currentMode = self.gestureStateManager.processGesturePriority(isGrabbing, bool(fingerTip), inMediaZone)
+
+        if currentMode.value == "volume" and isGrabbing:
+            self.handleVolumeControl(handLandmarks.landmark, w, h)
+        elif currentMode.value == "media" and fingerTip:
+            self.handleMediaControl(handLandmarks.landmark, w, h)
+        elif currentMode.value != "volume":
+            self.volumeController.stopAdjusting()
+        
+        if fingerTip:
+            fingerPositions = [fingerTip]
+            self.uiManager.drawFingerIndicators(frame, fingerPositions, currentMode)
     
     def run(self):
         print(f"[INFO] Starting SylphChord...")
+        print(f"[CONTROLS] L: Toggle Landmarks, R: Reset Gesture State, ESC: Exit")
+
         try:
             while self.camera.isOpened():
                 frame = self.camera.readFrame()
                 if frame is None:
                     print("[WARNING] Your camera is not on.")
                     continue
-
+                
+                fps = self.calculateFPS()
                 results = self.handDetector.detect(frame)
                 if results.multi_hand_landmarks:
                     for handLandmarks in results.multi_hand_landmarks:
-                        self.handDetector.drawLandmarks(frame, handLandmarks)
+                        if self.uiManager.showLandmarks:
+                            self.handDetector.drawLandmarks(frame, handLandmarks)
                         self.processGestures(handLandmarks, frame)
                 
-                self.mediaController.updateCooldowns()
-                if self.camera.frameCount % Config.volumeUpdateInterval == 0:
-                    self.volumeController.setVolume(self.volumeController.currentVolume)
+                else:
+                    self.volumeController.stopAdjusting()
                 
-                self.drawUI(frame)
-                cv2.imshow("Sylphchord", frame)
-                if cv2.waitKey(1) & 0xFF == 27:
+                self.mediaController.updateCooldowns()
+                
+                self.drawUI(frame, fps)
+                cv2.imshow("SylphChord", frame)
+
+                if self.handleKeyboardInput():
                     print("[INFO] ESC pressed, shutting down SylphChord...")
                     self.volumeController.setVolume(45)
                     break
@@ -95,6 +153,28 @@ class SylphChord:
         finally:
             self.camera.release()
             print("[INFO] SylphChord has been stopped.")
+
+class PerformanceMonitor:
+    def __init__(self):
+        self.frameTimes = []
+        self.gestureProcessTimes = []
+
+    def startFrameTimer(self):
+        self.frameStart = time.time()
+    
+    def endFrameTimer(self):
+        if hasattr(self, "frameStart"):
+            frameTime = time.time() - self.frameStart
+            self.frameTimes.append(frameTime)
+            if len(self.frameTimes) > 30:
+                self.frameTimes.pop(0)
+    
+    def getAverageFrameTime(self):
+        return sum(self.frameTimes) / len(self.frameTimes) if self.frameTimes else 0
+    
+    def shouldSkipFrame(self):
+        avgTime = self.getAverageFrameTime()
+        return avgTime > (1.0 / Config.minFpsThreshold) and Config.enableFrameSkipping
 
 if __name__ == "__main__":
     app = SylphChord()
