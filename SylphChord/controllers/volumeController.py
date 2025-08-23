@@ -18,6 +18,8 @@ class VolumeController:
         if time.time() - self.lastVolumeSet < 0.1:
             return
         
+        percent = max(0, min(100, percent))
+        
         try:
             subprocess.run([
                 "pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"
@@ -25,11 +27,14 @@ class VolumeController:
             print(f"[VOLUME] Volume has been set to: {percent}%")
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] Failed to set volume: {e}")
+        except FileNotFoundError:
+            print(f"[ERROR] 'pactl' not found: {e}")
     
     def startAdjusting(self, angle):
         self.adjusting = True
         self.startAngle = angle
         self.startVolume = self.currentVolume
+        self.prevDelta = 0.0
 
     def updateVolume(self, angle):
         if not self.adjusting:
@@ -40,6 +45,7 @@ class VolumeController:
         self.prevDelta = smootherDelta
 
         newVolume = int(self.startVolume + smootherDelta * Config.volumeSensitivity)
+        newVolume = max(0, min(100, newVolume))
         self.currentVolume = max(0, min(100, newVolume))
 
         if abs(newVolume - self.currentVolume) > 2:

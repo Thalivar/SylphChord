@@ -18,13 +18,14 @@ class Config:
     volumeUpdateInterval = 30
 
     # Media Control
-    playPauseCooldown = 30
-    nextCooldown = 30
-    prevCooldown = 30
+    playPauseCooldown = 3.0
+    nextCooldown = 3.0
+    prevCooldown = 3.0
+    mediaCooldown = 3.0
 
     # Gesture detection
-    fingerDistanceThreshold = 40
-    fingerExtensionThreshold = 50
+    fingerDistanceThreshold = 50
+    fingerExtensionThreshold = 60
     grabMinFingers = 3
     grabMinGap = 30
     grabMaxGap = 120
@@ -32,7 +33,7 @@ class Config:
     # Gesture settings
     gestureConfidenceThreshold = 0.7
     gestureStabilityFrames = 5
-    gestureModeSwitchCooldown = 0.5
+    gestureModeSwitchCooldown = 3.0
     gestureLockDuration = 1.0
     pointingGestureThreshold = 0.7
     buttonHoverTimer = 0.3

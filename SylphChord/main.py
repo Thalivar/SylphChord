@@ -53,17 +53,15 @@ class SylphChord:
     
     def handleKeyboardInput(self):
         key = cv2.waitKey(1) & 0xFF
+        char = chr(key).lower() if 0 <= key < 128 else ""
 
-        if key == ord("l") or key == ord("L"):
-            showLandmarks = self.uiManager.toggleLandmarks()
-            self.pendingNotification = f"Landmarks {'ON' if showLandmarks else 'OFF'}"
-        elif key == ord("r") or key == ord("R"):
+        if char == "r":
             self.gestureStateManager.setMode(GestureMode.idle)
             self.pendingNotification = "Gesture State Reset"
-        elif key == ord("m") or key == ord("M"):
+        elif char == "m":
             modeInfo = self.gestureStateManager.getModeInfo()
-            self.pendingNotification = f"Mode: {modeInfo['mode'].value.capitalize()}"
-        elif key == ord("h") or key == ord("H"):
+            self.pendingNotification = f"Mode: {modeInfo['mode'].value}"
+        elif char == "h":
             self.uiManager.showControlsHelp = not getattr(self.uiManager, "showControlsHelp", False)
         elif key == 27:
             return True
@@ -81,29 +79,34 @@ class SylphChord:
         indexTip = landmarks[8]
         x, y = int(indexTip.x * w), int(indexTip.y * h)
 
-        if self.zoneManager.isInZone(x, y, "play"):
-            self.mediaController.playPause()
-            self.pendingNotification = "Play/Pause has been triggered"
-        elif self.zoneManager.isInZone(x, y, "next"):
-            self.mediaController.nextSong()
-            self.pendingNotification = "Next song has been triggered"
-        elif self.zoneManager.isInZone(x, y, "prev"):
-            self.mediaController.prevSong()
-            self.pendingNotification = "Previous song has been triggered"
+        actions = (
+            ("play", "Play/Pause", self.mediaController.playPause),
+            ("next", "Next song", self.mediaController.nextSong),
+            ("prev", "Previous song", self.mediaController.prevSong)
+        )
+
+        for zone, label, fn in actions:
+            if self.zoneManager.isInZone(x, y, zone):
+                try:
+                    fn()
+                    self.pendingNotification = f"{label} triggered"
+                except Exception as e:
+                    self.pendingNotification = f"Failed to trigger {label}"
+                    print(f"[ERROR] {label} action failed: {e}")
+                break  
 
     def processGestures(self, handLandmarks, frame):
         h, w, c = frame.shape
         fingerTip = self.gestureProcessor.isOneFingerUp(handLandmarks.landmark, h, w)
-        extendedFingers, isGrabbing = self.gestureProcessor.isGrabbing(handLandmarks.landmark, h)
+        extendedFingers, isGrabbing = self.gestureProcessor.isGrabbing(handLandmarks.landmark, w, h)
 
-        inMediaZone = False
+        isMediaZone = False
         if fingerTip:
             x, y = fingerTip
-            inMediaZone = (self.zoneManager.isInZone(x, y, "play") or
-                           self.zoneManager.isInZone(x, y, "next") or
-                           self.zoneManager.isInZone(x, y, "prev"))
-        
-        currentMode = self.gestureStateManager.processGesturePriority(isGrabbing, bool(fingerTip), inMediaZone)
+            mediaZone = next((z for z in ("play", "next", "prev") if self.zoneManager.isInZone(x, y, z)), None)
+            isMediaZone = mediaZone is not None
+            
+        currentMode = self.gestureStateManager.processGesturePriority(isGrabbing, bool(fingerTip), isMediaZone)
 
         if currentMode.value == "volume" and isGrabbing:
             self.handleVolumeControl(handLandmarks.landmark, w, h)
@@ -111,14 +114,20 @@ class SylphChord:
             self.handleMediaControl(handLandmarks.landmark, w, h)
         elif currentMode.value != "volume":
             self.volumeController.stopAdjusting()
-        
-        if fingerTip:
+
+        if isGrabbing and not fingerTip:
+            fingerPositions = self.gestureProcessor.getFingerPositions(handLandmarks.landmark, w, h)
+            self.uiManager.drawGrabIndicators(frame, fingerPositions, currentMode)
+        elif fingerTip and not isGrabbing:
             fingerPositions = [fingerTip]
             self.uiManager.drawFingerIndicators(frame, fingerPositions, currentMode)
+        else:
+            if hasattr(self.uiManager, "clearIndicators"):
+                self.uiManager.clearIndicators(frame)
     
     def run(self):
         print(f"[INFO] Starting SylphChord...")
-        print(f"[CONTROLS] L: Toggle Landmarks, R: Reset Gesture State, ESC: Exit")
+        print(f"[CONTROLS] R: Reset Gesture State, H: Toggle Help, M: Show Mode, ESC: Exit")
 
         try:
             while self.camera.isOpened():
@@ -131,14 +140,10 @@ class SylphChord:
                 results = self.handDetector.detect(frame)
                 if results.multi_hand_landmarks:
                     for handLandmarks in results.multi_hand_landmarks:
-                        if self.uiManager.showLandmarks:
-                            self.handDetector.drawLandmarks(frame, handLandmarks)
                         self.processGestures(handLandmarks, frame)
                 
                 else:
                     self.volumeController.stopAdjusting()
-                
-                self.mediaController.updateCooldowns()
                 
                 self.drawUI(frame, fps)
                 cv2.imshow("SylphChord", frame)

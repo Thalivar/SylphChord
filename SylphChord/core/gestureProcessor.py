@@ -10,27 +10,32 @@ class GestureProcessor:
     def isOneFingerUp(self, landmarks, h, w):
         indexTip = self.mpHands.HandLandmark.INDEX_FINGER_TIP
         indexPip = self.mpHands.HandLandmark.INDEX_FINGER_PIP
-        indexPIP = self.mpHands.HandLandmark.INDEX_FINGER_PIP
         middleTip = self.mpHands.HandLandmark.MIDDLE_FINGER_TIP
         middlePip = self.mpHands.HandLandmark.MIDDLE_FINGER_PIP
         ringTip = self.mpHands.HandLandmark.RING_FINGER_TIP
         ringPip = self.mpHands.HandLandmark.RING_FINGER_PIP
         pinkyTip = self.mpHands.HandLandmark.PINKY_TIP
         pinkyPip = self.mpHands.HandLandmark.PINKY_PIP
-        indexExtended = landmarks[indexTip].y * h < landmarks[indexPip].y * h
-        indexExtension = abs(landmarks[indexTip].y - landmarks[indexPIP].y) * h
-        middleFolded = landmarks[middleTip].y * h > landmarks[middlePip].y * h
-        ringFolded = landmarks[ringTip].y * h > landmarks[ringPip].y * h
-        pinkyFolded = landmarks[pinkyTip].y * h > landmarks[pinkyPip].y * h
+        thumbTip = self.mpHands.HandLandmark.THUMB_TIP
+        thumbMcp = self.mpHands.HandLandmark.THUMB_MCP
 
-        if (indexExtended and middleFolded and ringFolded and pinkyFolded and indexExtension > Config.fingerExtensionThreshold):
+        indexExtended = landmarks[indexTip].y < landmarks[indexPip].y
+        indexExtension = abs(landmarks[indexTip].y - landmarks[indexPip].y) * h
+        middleFolded = landmarks[middleTip].y > landmarks[middlePip].y
+        ringFolded = landmarks[ringTip].y > landmarks[ringPip].y
+        pinkyFolded = landmarks[pinkyTip].y > landmarks[pinkyPip].y
+
+        thumbDistance = abs(landmarks[thumbTip].x - landmarks[thumbMcp].x)
+        thumbFolded = thumbDistance < Config.fingerDistanceThreshold
+
+        if (indexExtended and middleFolded and ringFolded and pinkyFolded and indexExtension > Config.fingerExtensionThreshold and thumbFolded):
             x = int(landmarks[indexTip].x * w)
             y = int(landmarks[indexTip].y * h)
             return (x, y)
 
         return None
 
-    def isGrabbing(self, landmarks, h):
+    def isGrabbing(self, landmarks, w, h):
         fingerTips = [
             self.mpHands.HandLandmark.INDEX_FINGER_TIP,
             self.mpHands.HandLandmark.MIDDLE_FINGER_TIP,
@@ -48,13 +53,31 @@ class GestureProcessor:
         thumbIp = self.mpHands.HandLandmark.THUMB_IP
 
         foldedFingers = 0
-        for tip, pip in zip(fingerTips, fingerPips):
+        extendedFingers = []
+
+        for i, (tip, pip) in enumerate(zip(fingerTips, fingerPips)):
             if landmarks[tip].y > landmarks[pip].y:
                 foldedFingers += 1
-
-        if landmarks[thumbTip].y > landmarks[thumbIp].x:
+            else:
+                extendedFingers.append(tip)
+        
+        thumbDistance = abs(landmarks[thumbTip].x - landmarks[thumbIp].x) * w
+        thumbFolded = thumbDistance < Config.fingerDistanceThreshold
+        if thumbFolded:
             foldedFingers += 1
+        
+        isGrabbing = foldedFingers >= 5
+        return extendedFingers, isGrabbing
+    
+    def getFingerPositions(self, landmarks, w, h, normalized: bool = False):
+        fingerTips = [
+            self.mpHands.HandLandmark.THUMB_TIP,
+            self.mpHands.HandLandmark.INDEX_FINGER_TIP,
+            self.mpHands.HandLandmark.MIDDLE_FINGER_TIP,
+            self.mpHands.HandLandmark.RING_FINGER_TIP,
+            self.mpHands.HandLandmark.PINKY_TIP
+        ]
 
-        isGrabbing = foldedFingers >= 4
-
-        return [], isGrabbing
+        if normalized:
+            return [(landmarks[tip].x, landmarks[tip].y) for tip in fingerTips]
+        return [(int(landmarks[tip].x * w), int(landmarks[tip].y * h)) for tip in fingerTips]

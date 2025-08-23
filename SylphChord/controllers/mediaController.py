@@ -1,50 +1,74 @@
 import subprocess
+import time
 from config.settings import Config
 
 class MediaController:
     def __init__(self, player = "spotify"):
         self.player = player
-        self.cooldowns = {
+        self.lastTriggered = {
             "playPause": 0,
             "next": 0,
             "prev": 0
         }
-        self.triggered = {
-            "playPause": False,
-            "next": False,
-            "prev": False
-        }
     
     def executeCommand(self, command, actionName):
         try:
-            subprocess.run([
-                "playerctl", "-p", self.player, command
-            ], check = True)
-            print(f"[MEDIA] {actionName} triggered")
-        except subprocess.CalledProcessError as e:
+            playersToTry = list(dict.fromkeys([self.player, "spotify", "%any"]))
+            
+            for player in playersToTry:
+                try:
+                    subprocess.run([
+                        "playerctl", "-p", player, command
+                    ], check = True, timeout = 2)
+                    print(f"[MEDIA] {actionName} triggered on {player}")
+                    return True
+                except subprocess.CalledProcessError:
+                    continue
+                except subprocess.TimeoutExpired:
+                    continue
+            
+            print(f"[ERROR] Failed to execute {actionName} on any player")
+            return False
+        except Exception as e:
             print(f"[ERROR] Failed to execute {actionName}: {e}")
+            return False
+    
+    def canTrigger(self, action):
+        currentTime = time.monotonic()
+        cooldownMap = {
+            "playPause": Config.mediaCooldown,
+            "next": Config.nextCooldown,
+            "prev": Config.prevCooldown
+        }
+
+        if action not in cooldownMap:
+            print(f"[ERROR] Unknow media action: {action}")
+            return False
+
+        cooldown = cooldownMap[action]
+            
+        return (currentTime - self.lastTriggered.get(action, 0)) >= cooldown
     
     def playPause(self):
-        if not self.triggered["playPause"]:
-            self.executeCommand("play-pause", "Play/Pause")
-            self.triggered["playPause"] = True
-            self.cooldowns["playPause"] = Config.playPauseCooldown
+        if self.canTrigger("playPause"):
+            success = self.executeCommand("play-pause", "Play/Pause")
+            if success:
+                self.lastTriggered["playPause"] = time.monotonic()
+                return True
+        return False
     
     def nextSong(self):
-        if not self.triggered["next"]:
-            self.executeCommand("next", "Next Song")
-            self.triggered["next"] = True
-            self.cooldowns["next"] = Config.nextCooldown
+        if self.canTrigger("next"):
+            success = self.executeCommand("next", "Next Song")
+            if success:
+                self.lastTriggered["next"] = time.monotonic()
+                return True
+        return False
     
     def prevSong(self):
-        if not self.triggered["prev"]:
-            self.executeCommand("previous", "Previous Song")
-            self.triggered["prev"] = True
-            self.cooldowns["prev"] = Config.prevCooldown
-    
-    def updateCooldowns(self):
-        for action in self.cooldowns:
-            if self.cooldowns[action] > 0:
-                self.cooldowns[action] -= 1
-            elif self.triggered[action]:
-                self.triggered[action] = False
+        if self.canTrigger("prev"):
+            success = self.executeCommand("previous", "Previous Song")
+            if success:
+                self.lastTriggered["prev"] = time.monotonic()
+                return True
+        return False

@@ -4,7 +4,6 @@ import numpy as np
 from config.settings import Config
 
 class UITheme:
-
     background = (25, 25, 35)
     primary = (100, 200 ,255)
     secondary = (150, 100, 255)
@@ -17,13 +16,28 @@ class UITheme:
 
 class UIManager:
     def __init__(self):
-        self.showLandmarks = Config.showLandmarksByDefault
         self.uiOpacity = Config.uiOpacity
         self.notificationqueue = []
-    
-    def toggleLandmarks(self):
-        self.showLandmarks = not self.showLandmarks
-        return self.showLandmarks
+        self.helpText = [
+            "Controls:",
+            "R - Reset The Gesture",
+            "M - Show Current Mode",
+            "H - Toggle This Help",
+            "ESC - Exit The Program"
+        ]
+        self.helpTextFont = cv2.FONT_HERSHEY_SIMPLEX
+        self.helpTextFontScale = 0.5
+        self.helpTextFontThickness = 1
+        self.helpTextMaxWidth = max([
+            cv2.getTextSize(text, self.helpTextFont, self.helpTextFontScale, self.helpTextFontThickness)[0][0]
+            for text in self.helpText
+        ])
+
+    def updateHelpTextCache(self):
+        self._helpTextMaxWidth = max([
+            cv2.getTextSize(text, self.helpTextFont, self.helpTextFontScale, self.helpTextFontThickness)[0][0]
+            for text in self.helpText
+        ])
 
     def drawVolumeBar(self, frame, volume, x = 50, y = 100, width = 20, height = 300):
         cv2.rectangle(frame, (x, y), (x + width, y + height), UITheme.background, - 1)
@@ -31,8 +45,9 @@ class UIManager:
 
         fillHeight = int((volume / 100.0) * height)
         if fillHeight > 0:
+            denom = max(fillHeight - 1, 1)
             for i in range(fillHeight):
-                alpha = 1 / fillHeight
+                alpha = i / denom
                 color = self.interpolateColor(UITheme.success, UITheme.warning, alpha)
                 yPos = y + height - i
                 cv2.line(frame, (x + 2, yPos), (x + width - 2, yPos), color, 1)
@@ -63,36 +78,53 @@ class UIManager:
 
         cv2.putText(frame, modeText, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
-    def drawFingerIndicators(self, frame, fingerPositions, gestureMode):
-        if not self.showLandmarks or not fingerPositions:
-            return
-    
-        if gestureMode.value == "volume":
-            color = UITheme.success
-            radius = 15
-        elif gestureMode.value == "media":
-            color = UITheme.primary
-            radius = 12
+    def modeStyle(self, gestureMode):
+        mode = getattr(gestureMode, 'value', str(gestureMode)).lower()
+        if mode == "volume":
+            return (UITheme.success, 15)
+        elif mode == "media":
+            return (UITheme.primary, 12)
+        elif mode == "locked":
+            return (UITheme.warning, 10)
         else:
-            color = UITheme.textSecondary
-            radius = 8
-        
+            return (UITheme.textSecondary, 10)
+
+    def drawFingerIndicators(self, frame, fingerPositions, gestureMode):
+        if not fingerPositions:
+            return
+        color, radius = self.modeStyle(gestureMode)
         pulse = int(5 * abs(np.sin(time.time() * 3)))
         for pos in fingerPositions:
             cx, cy = pos
             cv2.circle(frame, (cx, cy), radius + pulse, color, 2)
             cv2.circle(frame, (cx, cy), 4, color, -1)
-    
+
+    def drawGrabIndicators(self, frame, fingerPositions, gestureMode):
+        if not fingerPositions:
+            return
+        color, radius = self.modeStyle(gestureMode)
+        if len(fingerPositions) >= 4:
+            for i in range(len(fingerPositions)):
+                for j in range(i + 1, len(fingerPositions)):
+                    cv2.line(frame, fingerPositions[i], fingerPositions[j], color, 1)
+        for pos in fingerPositions:
+            cv2.circle(frame, pos, radius - 2, color, 2)
+            cv2.circle(frame, pos, max(3, radius - 7), color, -1)
+        for pos in fingerPositions:
+            cv2.circle(frame, pos, radius - 2, color, 2)
+            cv2.circle(frame, pos, max(3, radius - 7), color, -1)
+
     def showNotification(self, frame, message, duration = None):
         if duration is None:
             duration = Config.notificationDuration
 
         currentTime = time.time()
-        self.notificationqueue.append({
-            "message": message,
-            "startTime": currentTime,
-            "duration": duration
-        })
+        if message:
+            self.notificationqueue.append({
+                "message": message,
+                "startTime": currentTime,
+                "duration": duration
+            })
 
         self.notificationqueue = [n for n in self.notificationqueue if currentTime - n["startTime"] < n["duration"]]
 
@@ -121,15 +153,13 @@ class UIManager:
         cv2.putText(frame, text, (frame.shape[1] - 120, frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, UITheme.textSecondary, 1)
     
     def drawControlsHelp(self, frame):
-        helpText = [
-            "Controls:",
-            "L - Toggles Landmarks",
-            "H - Switch The Dominant Hand",
-            "R - Reset The Gesture",
-            "ESC - Exit The Program"
-        ]
+        yStart = frame.shape[0] - (len(self.helpText) * 25) - 10
+        maxWidth = self.helpTextMaxWidth
 
-        yStart = frame.shape[0] - (len(helpText) * 25) - 10
-        for i, text in enumerate(helpText):
+        cv2.rectangle(frame, (5, yStart - 15), (maxWidth + 15, frame.shape[0] - 5), UITheme.background, -1)
+        cv2.rectangle(frame, (5, yStart - 15), (maxWidth + 15, frame.shape[0] - 5), UITheme.primary, 2)
+
+        for i, text in enumerate(self.helpText):
             y = yStart + (i * 25)
-            cv2.putText(frame, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, UITheme.textSecondary, 1)
+            color = UITheme.primary if i == 0 else UITheme.textSecondary
+            cv2.putText(frame, text, (10, y), self.helpTextFont, self.helpTextFontScale, color, self.helpTextFontThickness)
